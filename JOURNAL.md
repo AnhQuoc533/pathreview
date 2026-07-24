@@ -7,7 +7,7 @@
 **Tier:** [ ] Tier 1  [✅] Tier 2  [ ] Tier 3
 
 **Problem summary:**  
-The PathReview project is missing a complete, end-to-end test suite for ingestion pipeline (parsing, chunking, embedding, and storing documents). This test suite must be located in `tests/integration/test_ingestion_pipeline.py` and use the fixtures in `tests/fixtures/sample_resumes`.
+The PathReview project is missing a complete, end-to-end test suite for ingestion pipeline (parsing, chunking, embedding, and storing documents). This test suite must be located in `tests/integration/test_ingestion_pipeline.py` and use the fixtures in `tests/fixtures/sample_resumes/`.
 
 **Branch name:** `test/18-ingestion-pipeline-tests`
 
@@ -45,3 +45,23 @@ The PathReview project is missing a complete, end-to-end test suite for ingestio
 ✅ I've estimated the time this will take and I'm confident I can complete it before the Week 9 deadline.
 * **Are there any blockers or dependencies?**  
 ✅ This issue has no open blockers or dependencies on other unresolved issues.
+
+
+# Week 8 — Reproduction & solution planning
+**Reproduction steps:**  
+1. Set up Docker: `docker compose up -d` and `docker compose ps`
+2. Set up project: `make setup`
+3. Run ingestion test: `make test-integration`
+
+**Reproduction result:** No test was ran when the command was executed. Additionally, there was no fixtures at all for this
+test suite. The only fixture was `tests/conftest.py`. However, it contains in-line, non-file-based samples which cannot simulate
+a real API call scenario for the ingestion pipeline
+
+**Reproduction commit link:** [link to commit documenting the reproduced issue]
+
+**Reproduction summary:** I ran the test suite for ingestion pipeline by executing `make test-integration`. However, no test was ran and no file-based fixtures existed.
+
+**PLAN.md link:** [link to PLAN.md in your fork]
+
+**Blockers or open questions:**
+[Anything you're still uncertain about going into Week 9, or leave blank]
