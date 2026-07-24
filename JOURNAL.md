@@ -57,11 +57,13 @@ The PathReview project is missing a complete, end-to-end test suite for ingestio
 test suite. The only fixture was `tests/conftest.py`. However, it contains in-line, non-file-based samples which cannot simulate
 a real API call scenario for the ingestion pipeline
 
-**Reproduction commit link:** [link to commit documenting the reproduced issue]
+**Reproduction commit link:** https://github.com/AnhQuoc533/pathreview/commit/1e31039
 
 **Reproduction summary:** I ran the test suite for ingestion pipeline by executing `make test-integration`. However, no test was ran and no file-based fixtures existed.
 
-**PLAN.md link:** [link to PLAN.md in your fork]
+**PLAN.md link:** https://github.com/AnhQuoc533/pathreview/blob/test/18-ingestion-pipeline-tests/PLAN.md
 
-**Blockers or open questions:**
-[Anything you're still uncertain about going into Week 9, or leave blank]
+**Blockers:**  
+- The exact structure of `ParseResult` returned by parsers (need to verify metadata fields)
+- The exact signature of `batch_processor.process()` and what it expects
+- Whether `db_session.query()` in `_check_skip()` can be mocked directly or if it needs a spy
