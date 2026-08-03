@@ -67,3 +67,36 @@ a real API call scenario for the ingestion pipeline
 - The exact structure of `ParseResult` returned by parsers (need to verify metadata fields)
 - The exact signature of `batch_processor.process()` and what it expects
 - Whether `db_session.query()` in `_check_skip()` can be mocked directly or if it needs a spy
+
+
+# Week 9 — Solution building & PR submission
+
+## Check-in 1 (mid-week)
+**Current progress:**  
+- Collect sample data (fixtures) for the test suite
+- Orchestrate fixtures in `tests/fixtures/sample_resumes/`
+- Mock `vector_db`, `db_session`, and `EmbeddingProvider` in the test suite
+
+**Next steps:** Complete the test suite by adding test cases for `ingest_resume()`, `ingest_readme()`, `ingest_repo_metadata()`.
+
+**Blockers:**  
+- Investigate which GitHub repository fields the `ingest_repo_metadata()` function needs to retrieve, inspect, and parse
+- The correct way to create mock dependencies so that the test suite run smoothly
+
+
+---
+
+## Check-in 2 (end of week)
+**PR link:** [link to your submitted pull request]
+
+**Branch:** `test/18-ingestion-pipeline-tests`
+
+**What you built:**
+[1–3 sentences summarizing what your fix does and how it works]
+
+**Tests added or updated:**
+[Which test files did you touch? What do they cover?]
+
+**Self-review confirmation:** [ ] make check passes  [ ] make test-unit passes
+
+**Draft PR feedback received from:** [name or Slack handle, or "none"]
