@@ -1,9 +1,55 @@
+"""Integration tests for the ingestion pipeline."""
+
+import json
+import pathlib
 from unittest.mock import MagicMock
-from typing import Optional, List
+
 import pytest
 
 from ingestion.embeddings.provider import MockEmbeddingProvider
 from ingestion.pipeline import IngestionPipeline, IngestResult
+
+
+def _load_profile_fixtures(profile_id: str) -> dict:
+    """Load all fixture data for a profile (resume, repos with readme and metadata)."""
+    fixture_dir = pathlib.Path(__file__).parent.parent / "fixtures" / "sample_resumes" / profile_id
+
+    if not fixture_dir.exists():
+        raise FileNotFoundError(f"Fixture directory not found for profile {profile_id}")
+
+    # Load resume (either .md or .pdf)
+    resume_content = None
+    if (fixture_dir / "resume.md").exists():
+        resume_content = (fixture_dir / "resume.md").read_text(encoding="utf-8")
+    elif (fixture_dir / "resume.pdf").exists():
+        resume_content = (fixture_dir / "resume.pdf").read_bytes()
+    else:
+        raise FileNotFoundError(f"Resume file not found for profile {profile_id}")
+
+    # Load all repos (metadata + readme pairs)
+    repos = []
+    metadata_files = sorted(fixture_dir.glob("*_metadata.json"))
+
+    for metadata_file in metadata_files:
+        repo_name = metadata_file.stem.replace("_metadata", "")
+        readme_file = fixture_dir / f"{repo_name}_README.md"
+
+        metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+        readme_content = readme_file.read_text(encoding="utf-8") if readme_file.exists() else ""
+
+        repos.append(
+            {
+                "name": repo_name,
+                "readme": readme_content,
+                "metadata": metadata,
+            }
+        )
+
+    return {
+        "profile_id": profile_id,
+        "resume": resume_content,
+        "repos": repos,
+    }
 
 
 @pytest.mark.integration
@@ -33,37 +79,29 @@ class TestIngestionPipeline:
             embedding_provider=MockEmbeddingProvider(),
         )
 
-    @pytest.fixture
-    def fixture_profiles(self) -> List[str]:
-        """Return list of available fixture profile IDs."""
-        return ["ql-001", "ql-100", "jn-001", "mb-001"]
+    @pytest.fixture(scope="session")
+    def fixture_ql_001(self) -> dict:
+        """Load all fixtures for profile ql-001."""
+        return _load_profile_fixtures("ql-001")
 
-    @pytest.fixture
-    def load_fixture_resume(self):
-        """Load resume file from fixture directory (string for .md, bytes for .pdf)."""
+    @pytest.fixture(scope="session")
+    def fixture_ql_100(self) -> dict:
+        """Load all fixtures for profile ql-100."""
+        return _load_profile_fixtures("ql-100")
 
-        def _load(profile_id: str) -> str | bytes:
-            import pathlib
+    @pytest.fixture(scope="session")
+    def fixture_jn_001(self) -> dict:
+        """Load all fixtures for profile jn-001."""
+        return _load_profile_fixtures("jn-001")
 
-            fixture_dir = (
-                pathlib.Path(__file__).parent.parent/"fixtures"/"sample_resumes"/profile_id
-            )
-            resume_file = None
-
-            if (fixture_dir / "resume.md").exists():
-                resume_file = fixture_dir / "resume.md"
-                return resume_file.read_text(encoding="utf-8")
-            elif (fixture_dir / "resume.pdf").exists():
-                resume_file = fixture_dir / "resume.pdf"
-                return resume_file.read_bytes()
-
-            raise FileNotFoundError(f"Resume not found for profile {profile_id}")
-
-        return _load
+    @pytest.fixture(scope="session")
+    def fixture_mb_001(self) -> dict:
+        """Load all fixtures for profile mb-001."""
+        return _load_profile_fixtures("mb-001")
 
     # =========== Test cases for ingest_resume() ===========
 
-    def test_ingest_resume_ql_001(self, pipeline, load_fixture_resume) -> None:
+    def test_ingest_resume_ql_001(self, pipeline: IngestionPipeline, fixture_ql_001: dict) -> None:
         """
         Test successful resume ingestion with fixture ql-001.
 
@@ -73,12 +111,9 @@ class TestIngestionPipeline:
         - Embedding provider throws exception
         - Database write fails
         """
-        profile_id = "ql-001"
-        resume_content = load_fixture_resume(profile_id)
-
         result = pipeline.ingest_resume(
-            profile_id=profile_id,
-            content=resume_content,
+            profile_id="ql-001",
+            content=fixture_ql_001["resume"],
             filename="resume.pdf",
         )
 
@@ -87,9 +122,9 @@ class TestIngestionPipeline:
         assert result.skip_reason is None
         assert result.chunk_count > 0
         assert isinstance(result.source_id, str)
-        assert result.source_id.startswith(f"resume_{profile_id}")
+        assert result.source_id.startswith("resume_ql-001")
 
-    def test_ingest_resume_jn_001(self, pipeline, load_fixture_resume) -> None:
+    def test_ingest_resume_jn_001(self, pipeline: IngestionPipeline, fixture_jn_001: dict) -> None:
         """
         Test successful resume ingestion with fixture jn-001 (markdown resume).
 
@@ -98,20 +133,19 @@ class TestIngestionPipeline:
         - Chunking strategy produces no chunks
         - Resume metadata is not preserved
         """
-        profile_id = "jn-001"
-        resume_content = load_fixture_resume(profile_id)
-
         result = pipeline.ingest_resume(
-            profile_id=profile_id,
-            content=resume_content,
+            profile_id="jn-001",
+            content=fixture_jn_001["resume"],
             filename="resume.md",
         )
 
         assert result.skipped is False
         assert result.chunk_count > 0
-        assert result.source_id.startswith(f"resume_{profile_id}")
+        assert result.source_id.startswith("resume_jn-001")
 
-    def test_ingest_identical_resume_different_profiles(self, pipeline, load_fixture_resume) -> None:
+    def test_ingest_identical_resume_different_profiles(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict, fixture_ql_100: dict
+    ) -> None:
         """
         Test that identical resume content with different profile IDs produces different source IDs.
 
@@ -124,36 +158,30 @@ class TestIngestionPipeline:
         - Hash function dominates source_id generation
         - Pipeline incorrectly deduplicates across different profiles
         """
-        profile_id_1 = "ql-001"
-        profile_id_2 = "ql-100"
-
-        resume_content_1 = load_fixture_resume(profile_id_1)
-        resume_content_2 = load_fixture_resume(profile_id_2)
-
         # Both should have identical content
-        assert resume_content_1 == resume_content_2
+        assert fixture_ql_001["resume"] == fixture_ql_100["resume"]
 
         result1 = pipeline.ingest_resume(
-            profile_id=profile_id_1,
-            content=resume_content_1,
+            profile_id="ql-001",
+            content=fixture_ql_001["resume"],
             filename="resume.pdf",
         )
 
         result2 = pipeline.ingest_resume(
-            profile_id=profile_id_2,
-            content=resume_content_2,
+            profile_id="ql-100",
+            content=fixture_ql_100["resume"],
             filename="resume.pdf",
         )
 
         # Despite identical content, source IDs must be different due to different profile IDs
         assert result1.source_id != result2.source_id
-        assert result1.source_id.startswith(f"resume_{profile_id_1}")
-        assert result2.source_id.startswith(f"resume_{profile_id_2}")
+        assert result1.source_id.startswith("resume_ql-001")
+        assert result2.source_id.startswith("resume_ql-100")
         assert result1.skipped is False
         assert result2.skipped is False
 
     def test_ingest_resume_skip_duplicate_profile(
-        self, pipeline, load_fixture_resume, mock_db_session
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict, mock_db_session: MagicMock
     ) -> None:
         """
         Test that ingesting the same profile ID twice correctly skips on second attempt.
@@ -167,13 +195,10 @@ class TestIngestionPipeline:
         - Skip logic uses wrong database query
         - Skip reason is not set correctly
         """
-        profile_id = "ql-001"
-        resume_content = load_fixture_resume(profile_id)
-
         # First ingestion should succeed
         result1 = pipeline.ingest_resume(
-            profile_id=profile_id,
-            content=resume_content,
+            profile_id="ql-001",
+            content=fixture_ql_001["resume"],
             filename="resume.pdf",
         )
         assert result1.skipped is False
@@ -186,8 +211,8 @@ class TestIngestionPipeline:
 
         # Second ingestion with same profile should be skipped
         result2 = pipeline.ingest_resume(
-            profile_id=profile_id,
-            content=resume_content,
+            profile_id="ql-001",
+            content=fixture_ql_001["resume"],
             filename="resume.pdf",
         )
 
@@ -196,7 +221,9 @@ class TestIngestionPipeline:
         assert result2.chunk_count == 0
         assert result2.source_id == first_source_id
 
-    def test_ingest_resume_deterministic_source_id(self, pipeline, load_fixture_resume) -> None:
+    def test_ingest_resume_deterministic_source_id(
+        self, pipeline: IngestionPipeline, fixture_mb_001: dict
+    ) -> None:
         """
         Test that same profile and content always produce same source ID (deterministic hashing).
 
@@ -205,25 +232,28 @@ class TestIngestionPipeline:
         - Source ID includes random components
         - Source ID format is inconsistent
         """
-        profile_id = "mb-001"
-        resume_content = load_fixture_resume(profile_id)
-
         result1 = pipeline.ingest_resume(
-            profile_id=profile_id,
-            content=resume_content,
+            profile_id="mb-001",
+            content=fixture_mb_001["resume"],
             filename="resume.pdf",
         )
 
         result2 = pipeline.ingest_resume(
-            profile_id=profile_id,
-            content=resume_content,
+            profile_id="mb-001",
+            content=fixture_mb_001["resume"],
             filename="resume.pdf",
         )
 
         # Same profile and content should always produce same source_id
         assert result1.source_id == result2.source_id
 
-    def test_ingest_resume_chunks_fixture_content(self, pipeline, load_fixture_resume) -> None:
+    def test_ingest_resume_chunks_fixture_content(
+        self,
+        pipeline: IngestionPipeline,
+        fixture_ql_001: dict,
+        fixture_jn_001: dict,
+        fixture_mb_001: dict,
+    ) -> None:
         """
         Test that fixture resumes are properly chunked into multiple segments.
 
@@ -232,13 +262,17 @@ class TestIngestionPipeline:
         - Chunks don't preserve section information
         - Metadata is lost during chunking
         """
-        for profile_id in ["ql-001", "jn-001", "mb-001"]:
-            resume_content = load_fixture_resume(profile_id)
+        fixtures = [
+            ("ql-001", fixture_ql_001, "resume.pdf"),
+            ("jn-001", fixture_jn_001, "resume.md"),
+            ("mb-001", fixture_mb_001, "resume.pdf"),
+        ]
 
+        for profile_id, fixture, filename in fixtures:
             result = pipeline.ingest_resume(
                 profile_id=profile_id,
-                content=resume_content,
-                filename="resume.pdf" if profile_id != "jn-001" else "resume.md",
+                content=fixture["resume"],
+                filename=filename,
             )
 
             # All fixtures should produce at least some chunks
