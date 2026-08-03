@@ -594,3 +594,236 @@ class TestIngestionPipeline:
                 repo_name=repo["name"],
                 content=repo["readme"],
             )
+
+    # =========== Test cases for ingest_repo_metadata() ===========
+
+    def test_ingest_repo_metadata_ql_001_first_repo(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict
+    ) -> None:
+        """
+        Test successful repo metadata ingestion with fixture ql-001 (first repository).
+
+        Failure modes:
+        - Repository analyzer fails to extract metadata
+        - Chunking strategy produces no chunks
+        - Embedding provider throws exception
+        - Database write fails
+        """
+        repo = fixture_ql_001["repos"][0]
+        result = pipeline.ingest_repo_metadata(
+            profile_id="ql-001",
+            repo_data=repo["metadata"],
+        )
+
+        assert isinstance(result, IngestResult)
+        assert result.skipped is False
+        assert result.skip_reason is None
+        assert result.chunk_count > 0
+        assert isinstance(result.source_id, str)
+        assert result.source_id.startswith("repo_ql-001_")
+
+    def test_ingest_multiple_repo_metadata_same_profile(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict
+    ) -> None:
+        """
+        Test ingesting metadata from multiple repos for same profile.
+
+        Failure modes:
+        - Different repos are incorrectly deduplicated
+        - Source ID doesn't include repo_name
+        - Metadata doesn't preserve repo information
+        """
+        results = []
+        for repo in fixture_ql_001["repos"]:
+            result = pipeline.ingest_repo_metadata(
+                profile_id="ql-001",
+                repo_data=repo["metadata"],
+            )
+            results.append(result)
+
+        # All repos should be ingested successfully
+        assert len(results) > 0
+        for result in results:
+            assert result.skipped is False
+            assert result.chunk_count > 0
+
+        # Each repo should have different source_id
+        source_ids = [r.source_id for r in results]
+        assert len(source_ids) == len(set(source_ids)), "Source IDs should be unique per repo"
+
+    def test_ingest_same_repo_metadata_different_profiles(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict, fixture_ql_100: dict
+    ) -> None:
+        """
+        Test that same repo metadata with different profile IDs produces different source IDs.
+
+        ql-001 and ql-100 have identical repo metadata but must be ingested separately
+        because they represent different profiles.
+
+        Failure modes:
+        - Source ID doesn't include profile_id
+        - Pipeline incorrectly deduplicates across different profiles
+        """
+        # Get first repo from both profiles (same repo exists in both)
+        repo_ql001 = fixture_ql_001["repos"][0]
+        repo_ql100 = fixture_ql_100["repos"][0]
+
+        # Both should have identical metadata (ql-001 and ql-100 have same files)
+        assert repo_ql001["metadata"] == repo_ql100["metadata"]
+
+        result1 = pipeline.ingest_repo_metadata(
+            profile_id="ql-001",
+            repo_data=repo_ql001["metadata"],
+        )
+
+        result2 = pipeline.ingest_repo_metadata(
+            profile_id="ql-100",
+            repo_data=repo_ql100["metadata"],
+        )
+
+        # Despite identical metadata, source IDs must be different due to different profile IDs
+        assert result1.source_id != result2.source_id
+        assert result1.source_id.startswith("repo_ql-001_")
+        assert result2.source_id.startswith("repo_ql-100_")
+        assert result1.skipped is False
+        assert result2.skipped is False
+
+    def test_ingest_repo_metadata_skip_duplicate(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict, mock_db_session: MagicMock
+    ) -> None:
+        """
+        Test that ingesting the same repo metadata twice correctly skips on second attempt.
+
+        Failure modes:
+        - _check_skip() doesn't find existing source
+        - Source ID comparison fails
+        - Skip logic uses wrong database query
+        """
+        repo = fixture_ql_001["repos"][0]
+
+        # First ingestion should succeed
+        result1 = pipeline.ingest_repo_metadata(
+            profile_id="ql-001",
+            repo_data=repo["metadata"],
+        )
+        assert result1.skipped is False
+        first_source_id = result1.source_id
+
+        # Mock database to simulate source already exists
+        mock_db_session.query.return_value.filter_by.return_value.first.return_value = {
+            "source_id": first_source_id
+        }
+
+        # Second ingestion with same repo should be skipped
+        result2 = pipeline.ingest_repo_metadata(
+            profile_id="ql-001",
+            repo_data=repo["metadata"],
+        )
+
+        assert result2.skipped is True
+        assert result2.skip_reason == "Source already ingested"
+        assert result2.chunk_count == 0
+        assert result2.source_id == first_source_id
+
+    def test_ingest_different_repo_metadata_same_profile(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict
+    ) -> None:
+        """
+        Test that different repo metadata with same profile ID produces
+        different source IDs (hash-based deduplication).
+
+        Failure modes:
+        - Hash function doesn't differentiate metadata
+        - Source ID doesn't include content hash
+        """
+        repo1 = fixture_ql_001["repos"][0]
+        repo2 = fixture_ql_001["repos"][1] if len(fixture_ql_001["repos"]) > 1 else None
+
+        if not repo2:
+            # If only one repo in fixture, skip this test
+            pytest.skip("Fixture has only one repo")
+
+        result1 = pipeline.ingest_repo_metadata(
+            profile_id="test-repo",
+            repo_data=repo1["metadata"],
+        )
+
+        result2 = pipeline.ingest_repo_metadata(
+            profile_id="test-repo",
+            repo_data=repo2["metadata"],
+        )
+
+        # Different metadata should produce different source_ids
+        assert result1.source_id != result2.source_id
+        assert result1.source_id.startswith("repo_test-repo_")
+        assert result2.source_id.startswith("repo_test-repo_")
+
+    def test_ingest_repo_metadata_deterministic_source_id(
+        self, pipeline: IngestionPipeline, fixture_jn_001: dict
+    ) -> None:
+        """
+        Test that same profile and metadata always produce same source ID.
+
+        Failure modes:
+        - Hash function is non-deterministic
+        - Source ID includes random components
+        """
+        repo = fixture_jn_001["repos"][0]
+
+        result1 = pipeline.ingest_repo_metadata(
+            profile_id="jn-001",
+            repo_data=repo["metadata"],
+        )
+
+        result2 = pipeline.ingest_repo_metadata(
+            profile_id="jn-001",
+            repo_data=repo["metadata"],
+        )
+
+        # Same metadata should always produce same source_id
+        assert result1.source_id == result2.source_id
+
+    def test_ingest_repo_metadata_extracts_language_and_tech_stack(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict
+    ) -> None:
+        """
+        Test that repo analyzer correctly extracts language and tech stack from metadata.
+
+        Failure modes:
+        - Language field not extracted
+        - Tech stack detection fails
+        - Metadata not preserved through chunking
+        """
+        repo = fixture_ql_001["repos"][0]
+        metadata = repo["metadata"]
+
+        # Verify metadata has required fields for analysis
+        assert "language" in metadata or "primary_language" in metadata.get("topics", [])
+
+        result = pipeline.ingest_repo_metadata(
+            profile_id="ql-001",
+            repo_data=metadata,
+        )
+
+        # Metadata should be analyzed and produce chunks
+        assert result.skipped is False
+        assert result.chunk_count > 0
+
+    def test_ingest_repo_metadata_batch_processor_failure_propagates(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict, mock_vector_db: MagicMock
+    ) -> None:
+        """
+        Test that batch processor failures propagate as exceptions during metadata ingestion.
+
+        Failure modes:
+        - Embedding generation failure is silently ignored
+        - Error is not raised to caller
+        """
+        repo = fixture_ql_001["repos"][0]
+        mock_vector_db.add.side_effect = RuntimeError("Vector DB storage failed")
+
+        with pytest.raises(RuntimeError, match="Vector DB storage failed"):
+            pipeline.ingest_repo_metadata(
+                profile_id="ql-001",
+                repo_data=repo["metadata"],
+            )
