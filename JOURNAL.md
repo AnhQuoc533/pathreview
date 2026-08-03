@@ -91,12 +91,15 @@ a real API call scenario for the ingestion pipeline
 
 **Branch:** `test/18-ingestion-pipeline-tests`
 
-**What you built:**
-[1–3 sentences summarizing what your fix does and how it works]
+**What you built:** An end-to-end integration pipeline test suite exists at `tests/integration/test_ingestion_pipeline.py` and 
+stress-tests the document ingestion features.
+|         Method         | Test Count |                          Coverage                         |
+|:-----------------------|:----------:|:----------------------------------------------------------|
+|`ingest_resume() `      |      9     | PDF, Markdown, dedup, hash, error handling                |
+|`ingest_readme()`       |      8     | Multiple repos, profile uniqueness, hash, error handling  |
+|`ingest_repo_metadata()`|      9     | Multiple repos, language extraction, hash, error handling |
+|Total                   |     26     |                                                           |
 
-**Tests added or updated:**
-[Which test files did you touch? What do they cover?]
-
-**Self-review confirmation:** [ ] make check passes  [ ] make test-unit passes
+**Self-review confirmation:** [✅] make check passes  [✅] make test-unit passes
 
 **Draft PR feedback received from:** [name or Slack handle, or "none"]

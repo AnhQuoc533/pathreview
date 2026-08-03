@@ -7,7 +7,7 @@ https://github.com/ascherj/pathreview/issues/18
 ## Understanding
 **Root Cause:** The project is missing a end-to-end test suite for ingestion pipeline, even though there are unit tests for individual parsers.
 
-**Expected Behavior:** A complete integration test suite exists at `tests/integration/test_ingestion_pipeline.py` and stress-tests the document ingestion feature. This test suite uses `pytest` and follows the code patterns and convenions that are set by the existing test suites in `tests/unit`
+**Expected Behavior:** A complete integration test suite exists at `tests/integration/test_ingestion_pipeline.py` and stress-tests the document ingestion features. This test suite uses `pytest` and follows the code patterns and convenions that are set by the existing test suites in `tests/unit`
 
 **Actual Behavior:** The ingestion pipeline is untested and could produce undetected bugs due to the absence of end-to-end integration test suite.
 
