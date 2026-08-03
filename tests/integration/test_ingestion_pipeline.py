@@ -281,24 +281,19 @@ class TestIngestionPipeline:
 
     def test_ingest_empty_resume_content(self, pipeline: IngestionPipeline) -> None:
         """
-        Test graceful handling of empty resume content.
+        Test empty resume content resulting in zero chunk count.
 
         Failure modes:
         - Parser crashes on empty input
         - Empty chunks are created
         - Error is not properly logged
         """
-        try:
-            result = pipeline.ingest_resume(
-                profile_id="empty-test",
-                content="",
-                filename="empty.txt",
-            )
-            # If it doesn't raise, it should skip or have zero chunks
-            assert result.skipped or result.chunk_count == 0
-        except Exception:
-            # It's acceptable to raise an exception for empty input
-            pass
+        result = pipeline.ingest_resume(
+            profile_id="empty-test",
+            content="",
+            filename="empty.txt",
+        )
+        assert result.chunk_count == 0
 
     def test_ingest_different_resume_same_profile(
         self, pipeline: IngestionPipeline, fixture_ql_001: dict, fixture_jn_001: dict
@@ -340,7 +335,6 @@ class TestIngestionPipeline:
         - Error is not logged
         - Partial state left in vector_db
         """
-        # Corrupted PDF-like bytes (not actually a valid PDF)
         invalid_pdf = b"%PDF-INVALID\x00\xff\xfe"
 
         with pytest.raises(ValueError):
@@ -369,4 +363,234 @@ class TestIngestionPipeline:
                 profile_id="ql-001",
                 content=fixture_ql_001["resume"],
                 filename="resume.pdf",
+            )
+
+    # =========== Test cases for ingest_readme() ===========
+
+    def test_ingest_readme_ql_001_first_repo(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict
+    ) -> None:
+        """
+        Test successful readme ingestion with fixture ql-001 (first repository).
+
+        Failure modes:
+        - README parser fails to extract text from markdown
+        - Chunking strategy produces no chunks
+        - Embedding provider throws exception
+        - Database write fails
+        """
+        repo = fixture_ql_001["repos"][0]
+        result = pipeline.ingest_readme(
+            profile_id="ql-001",
+            repo_name=repo["name"],
+            content=repo["readme"],
+        )
+
+        assert isinstance(result, IngestResult)
+        assert result.skipped is False
+        assert result.skip_reason is None
+        assert result.chunk_count > 0
+        assert isinstance(result.source_id, str)
+        assert result.source_id.startswith(f"readme_ql-001_{repo['name']}")
+
+    def test_ingest_multiple_readmes_same_profile(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict
+    ) -> None:
+        """
+        Test ingesting multiple READMEs from different repos for same profile.
+
+        Failure modes:
+        - Different repos are incorrectly deduplicated
+        - Source ID doesn't include repo_name
+        - Metadata doesn't preserve repo information
+        """
+        results = []
+        for repo in fixture_ql_001["repos"]:
+            result = pipeline.ingest_readme(
+                profile_id="ql-001",
+                repo_name=repo["name"],
+                content=repo["readme"],
+            )
+            results.append(result)
+
+        # All repos should be ingested successfully
+        assert len(results) > 0
+        for result in results:
+            assert result.skipped is False
+            assert result.chunk_count > 0
+
+        # Each repo should have different source_id
+        source_ids = [r.source_id for r in results]
+        assert len(source_ids) == len(set(source_ids)), "Source IDs should be unique per repo"
+
+    def test_ingest_readme_same_repo_different_profiles(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict, fixture_ql_100: dict
+    ) -> None:
+        """
+        Test that same repo name with different profile IDs produces different source IDs.
+
+        ql-001 and ql-100 have identical repos but must be ingested separately because
+        they represent different profiles.
+
+        Failure modes:
+        - Source ID doesn't include profile_id
+        - Pipeline incorrectly deduplicates across different profiles
+        - Repo name and profile_id both matter for uniqueness
+        """
+        # Get first repo from both profiles (same repo exists in both)
+        repo_ql001 = fixture_ql_001["repos"][0]
+        repo_ql100 = fixture_ql_100["repos"][0]
+
+        # Both should have identical content (ql-001 and ql-100 have same files)
+        assert repo_ql001["readme"] == repo_ql100["readme"]
+
+        result1 = pipeline.ingest_readme(
+            profile_id="ql-001",
+            repo_name=repo_ql001["name"],
+            content=repo_ql001["readme"],
+        )
+
+        result2 = pipeline.ingest_readme(
+            profile_id="ql-100",
+            repo_name=repo_ql100["name"],
+            content=repo_ql100["readme"],
+        )
+
+        # Despite identical content, source IDs must be different due to different profile IDs
+        assert result1.source_id != result2.source_id
+        assert result1.source_id.startswith("readme_ql-001_")
+        assert result2.source_id.startswith("readme_ql-100_")
+        assert result1.skipped is False
+        assert result2.skipped is False
+
+    def test_ingest_readme_skip_duplicate(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict, mock_db_session: MagicMock
+    ) -> None:
+        """
+        Test that ingesting the same repo README twice correctly skips on second attempt.
+
+        Failure modes:
+        - _check_skip() doesn't find existing source
+        - Source ID comparison fails
+        - Skip logic uses wrong database query
+        """
+        repo = fixture_ql_001["repos"][0]
+
+        # First ingestion should succeed
+        result1 = pipeline.ingest_readme(
+            profile_id="ql-001",
+            repo_name=repo["name"],
+            content=repo["readme"],
+        )
+        assert result1.skipped is False
+        first_source_id = result1.source_id
+
+        # Mock database to simulate source already exists
+        mock_db_session.query.return_value.filter_by.return_value.first.return_value = {
+            "source_id": first_source_id
+        }
+
+        # Second ingestion with same repo should be skipped
+        result2 = pipeline.ingest_readme(
+            profile_id="ql-001",
+            repo_name=repo["name"],
+            content=repo["readme"],
+        )
+
+        assert result2.skipped is True
+        assert result2.skip_reason == "Source already ingested"
+        assert result2.chunk_count == 0
+        assert result2.source_id == first_source_id
+
+    def test_ingest_different_readme_same_repo_same_profile(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict
+    ) -> None:
+        """
+        Test that different README content produces different source IDs
+        (hash-based deduplication), despite identical repo name and profile ID.
+
+        Failure modes:
+        - Hash function doesn't differentiate content
+        - Source ID doesn't include content hash
+        """
+        repo = fixture_ql_001["repos"][0]
+        profile_id = "test-readme"
+        repo_name = repo["name"]
+
+        content1 = repo["readme"]
+        content2 = fixture_ql_001["repos"][2]["readme"]
+
+        result1 = pipeline.ingest_readme(
+            profile_id=profile_id,
+            repo_name=repo_name,
+            content=content1,
+        )
+
+        result2 = pipeline.ingest_readme(
+            profile_id=profile_id,
+            repo_name=repo_name,
+            content=content2,
+        )
+
+        # Different content should produce different source_ids
+        assert result1.source_id != result2.source_id
+        assert result1.source_id.startswith(f"readme_{profile_id}_{repo_name}")
+        assert result2.source_id.startswith(f"readme_{profile_id}_{repo_name}")
+
+    def test_ingest_readme_deterministic_source_id(
+        self, pipeline: IngestionPipeline, fixture_jn_001: dict
+    ) -> None:
+        """
+        Test that same profile, repo, and content always produce same source ID.
+
+        Failure modes:
+        - Hash function is non-deterministic
+        - Source ID includes random components
+        """
+        repo = fixture_jn_001["repos"][0]
+
+        result1 = pipeline.ingest_readme(
+            profile_id="jn-001",
+            repo_name=repo["name"],
+            content=repo["readme"],
+        )
+
+        result2 = pipeline.ingest_readme(
+            profile_id="jn-001",
+            repo_name=repo["name"],
+            content=repo["readme"],
+        )
+
+        # Same content should always produce same source_id
+        assert result1.source_id == result2.source_id
+
+    def test_ingest_empty_readme(self, pipeline: IngestionPipeline) -> None:
+        """
+        Test empty README content resulting in zero chunk count.
+
+        Failure modes:
+        - Parser crashes on empty input
+        - Empty chunks are created
+        """
+        result = pipeline.ingest_readme(profile_id="empty-test", repo_name="test-repo", content="")
+        assert result.chunk_count == 0
+
+    def test_ingest_readme_batch_processor_failure_propagates(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict, mock_vector_db: MagicMock
+    ) -> None:
+        """
+        Test that batch processor failures propagate as exceptions during README ingestion.
+
+        Failure modes:
+        - Embedding generation failure is silently ignored
+        - Error is not raised to caller
+        """
+        repo = fixture_ql_001["repos"][0]
+        mock_vector_db.add.side_effect = RuntimeError("Vector DB storage failed")
+
+        with pytest.raises(RuntimeError, match="Vector DB storage failed"):
+            pipeline.ingest_readme(
+                profile_id="ql-001",
+                repo_name=repo["name"],
+                content=repo["readme"],
             )
