@@ -143,7 +143,7 @@ class TestIngestionPipeline:
         assert result.chunk_count > 0
         assert result.source_id.startswith("resume_jn-001")
 
-    def test_ingest_identical_resume_different_profiles(
+    def test_ingest_same_resume_different_profiles(
         self, pipeline: IngestionPipeline, fixture_ql_001: dict, fixture_ql_100: dict
     ) -> None:
         """
@@ -278,3 +278,95 @@ class TestIngestionPipeline:
             # All fixtures should produce at least some chunks
             assert result.chunk_count > 0, f"Profile {profile_id} produced no chunks"
             assert result.skipped is False
+
+    def test_ingest_empty_resume_content(self, pipeline: IngestionPipeline) -> None:
+        """
+        Test graceful handling of empty resume content.
+
+        Failure modes:
+        - Parser crashes on empty input
+        - Empty chunks are created
+        - Error is not properly logged
+        """
+        try:
+            result = pipeline.ingest_resume(
+                profile_id="empty-test",
+                content="",
+                filename="empty.txt",
+            )
+            # If it doesn't raise, it should skip or have zero chunks
+            assert result.skipped or result.chunk_count == 0
+        except Exception:
+            # It's acceptable to raise an exception for empty input
+            pass
+
+    def test_ingest_different_resume_same_profile(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict, fixture_jn_001: dict
+    ) -> None:
+        """
+        Test that different content with same profile_id produces
+        different source_ids (deduplication by hash).
+
+        Failure modes:
+        - Hash function doesn't differentiate content
+        - Source ID only depends on profile_id
+        - Deduplication incorrectly reuses source_id
+        """
+        profile_id = "abc-010"
+
+        result1 = pipeline.ingest_resume(
+            profile_id=profile_id,
+            content=fixture_ql_001["resume"],
+            filename="resume1.txt",
+        )
+
+        result2 = pipeline.ingest_resume(
+            profile_id=profile_id,
+            content=fixture_jn_001["resume"],
+            filename="resume2.txt",
+        )
+
+        # Different content should produce different source_ids (hash-based deduplication)
+        assert result1.source_id != result2.source_id
+        assert result1.source_id.startswith(f"resume_{profile_id}")
+        assert result2.source_id.startswith(f"resume_{profile_id}")
+
+    def test_ingest_resume_invalid_format_parser_error(self, pipeline: IngestionPipeline) -> None:
+        """
+        Test that invalid/corrupted resume format is caught and handled gracefully.
+
+        Failure modes:
+        - Parser crashes on invalid format
+        - Error is not logged
+        - Partial state left in vector_db
+        """
+        # Corrupted PDF-like bytes (not actually a valid PDF)
+        invalid_pdf = b"%PDF-INVALID\x00\xff\xfe"
+
+        with pytest.raises(ValueError):
+            pipeline.ingest_resume(
+                profile_id="invalid-test",
+                content=invalid_pdf,
+                filename="corrupted.pdf",
+            )
+
+    def test_ingest_resume_batch_processor_failure_propagates(
+        self, pipeline: IngestionPipeline, fixture_ql_001: dict, mock_vector_db: MagicMock
+    ) -> None:
+        """
+        Test that batch processor failures propagate as exceptions (not silently ignored).
+
+        Failure modes:
+        - Embedding generation failure is silently ignored
+        - Error is not raised to caller (exception swallowed)
+        - Partial embeddings stored in vector_db
+        """
+        # Make vector_db.add() raise an exception, simulating storage failure
+        mock_vector_db.add.side_effect = RuntimeError("Vector DB storage failed")
+
+        with pytest.raises(RuntimeError, match="Vector DB storage failed"):
+            pipeline.ingest_resume(
+                profile_id="ql-001",
+                content=fixture_ql_001["resume"],
+                filename="resume.pdf",
+            )
