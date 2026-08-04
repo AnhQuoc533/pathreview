@@ -7,7 +7,7 @@
 **Tier:** [ ] Tier 1  [✅] Tier 2  [ ] Tier 3
 
 **Problem summary:**  
-The PathReview project is missing a complete, end-to-end test suite for ingestion pipeline (parsing, chunking, embedding, and storing documents). This test suite must be located in `tests/integration/test_ingestion_pipeline.py` and use the fixtures in `tests/fixtures/sample_resumes/`.
+The PathReview project is missing a complete, end-to-end test suite for ingestion pipeline (parsing, chunking, embedding, and storing documents). This test suite must be located at `tests/integration/test_ingestion_pipeline.py` and must use the fixtures in `tests/fixtures/sample_resumes/`.
 
 **Branch name:** `test/18-ingestion-pipeline-tests`
 
@@ -87,7 +87,7 @@ a real API call scenario for the ingestion pipeline
 ---
 
 ## Check-in 2 (end of week)
-**PR link:** [link to your submitted pull request]
+**PR link:** https://github.com/ascherj/pathreview/pull/719
 
 **Branch:** `test/18-ingestion-pipeline-tests`
 
@@ -102,4 +102,4 @@ stress-tests the document ingestion features.
 
 **Self-review confirmation:** [✅] make check passes  [✅] make test-unit passes
 
-**Draft PR feedback received from:** [name or Slack handle, or "none"]
+**Draft PR feedback received from:** TBD
