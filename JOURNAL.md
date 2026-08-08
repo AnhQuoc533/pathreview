@@ -95,11 +95,47 @@ a real API call scenario for the ingestion pipeline
 stress-tests the document ingestion features.
 |         Method         | Test Count |                          Coverage                         |
 |:-----------------------|:----------:|:----------------------------------------------------------|
-|`ingest_resume() `      |      9     | PDF, Markdown, dedup, hash, error handling                |
+|`ingest_resume() `      |     10     | PDF, Markdown, dedup, hash, error handling                |
 |`ingest_readme()`       |      8     | Multiple repos, profile uniqueness, hash, error handling  |
-|`ingest_repo_metadata()`|      9     | Multiple repos, language extraction, hash, error handling |
+|`ingest_repo_metadata()`|      8     | Multiple repos, language extraction, hash, error handling |
 |Total                   |     26     |                                                           |
 
 **Self-review confirmation:** [✅] make check passes  [✅] make test-unit passes
 
-**Draft PR feedback received from:** TBD
+**Draft PR feedback received from:** *TF - Christopher Castro*
+
+
+# Week 10 — Iteration & reflection
+
+## Reviewer feedback
+
+**Feedback received:** [✅] Yes  [ ] No — still awaiting review
+
+**Summary of feedback:**
+> Good coverage here, 25 tests across all three ingestion methods (resume, README, repo metadata) with dedup, hashing, and error handling. Two things to fix before this can move forward, though: it's still in Draft, so no one can review it yet, and the testing checklist is missing before/after numbers like your peers included, which would help a reviewer confirm no regressions were introduced.
+
+**How you responded:**  
+- Change the PR request from **Draft** to **Ready for Review**
+- Add 1 more task to the testing checklist (code formatter passed) and mark it off
+- Add **Demo Result** section to the PR, showcasing the result of my test suite
+- Clarify the unit test results to confirm that no regressions occurred and that no additional errors were introduced.
+
+---
+
+## Reflection
+
+**What was harder than you expected?**  
+What challenged me the most were trying to understand the structure and the workflow of this project, as it did not contain a comprehensive documentation. Additionally, I found it quite hard to follow the pre-defined coding standards and pass all the commit checkers.
+
+**What did you learn about working in a large codebase?**  
+I have learned about the level of formality, the contribution process, and the coding conventions within a large, open-source codebase. Compared to building my own projects, contributing to a open-source, community-driven project requires compliance with well-established rules, standards, and procedures that protect and reinforce the professionalism, consistency, maintainability across the codebase.
+
+**How did AI tools help — and where did they fall short?**  
+AI tools helped me quickly analyze and understand the complexity of this codebase while navigating through the selected issue. They were especially useful for reading and understanding multiple files simultaneously, creating comprehensive test plans with edge cases, mocking setup, and detecting violations of coding standards.  
+However, they occasionally fell short when understanding some of the edge cases, debugging linter/type checker failures, and specifying the exact exception type to expect.
+
+**What would you do differently if you started over?**  
+I would start early and plan my work carefully. More specifically, I would create a thorough checklist of all edge cases upfront, verify mock implementations with actual library behavior earlier, and spend more time reading existing test patterns in the unit test suites before writing my own.
+
+**What are you most proud of from this module?**  
+I am proud of the test suite I created for a feature in a large codebase and the PR I initiated for the first time on GitHub. This marks my first successful contribution to an open-source project and demonstrates my ability to write professional-grade test code. 
